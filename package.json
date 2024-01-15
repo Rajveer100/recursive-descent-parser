@@ -1,0 +1,12 @@
+{
+  "name": "recursive-descent-parser",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node tests/run.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
