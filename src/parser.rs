@@ -122,17 +122,23 @@ mod tests {
     fn test_literals() {
         let mut parser = Parser::new();
 
-        let program: String = String::from(r#""42""#);
+        let program: String = String::from(r#"
+            // Program
+            /*
+                Multiline comments...
+            */
+            42
+        "#);
 
         let ast = parser.parse(program);
 
         assert_eq!(
             ast,
             Some(Literal {
-                literal_type: LiteralType::Type(String::from("StringLiteral")),
-                value: String::from("42"),
+                literal_type: LiteralType::Type(String::from("NumericLiteral")),
+                value: String::from(r#"42"#),
             })
         );
-        println!("{:?}", ast);
+        dbg!(ast);
     }
 }

@@ -3,6 +3,24 @@
 /// Lazily pulls a token from a stream.
 
 use crate::parser::{Literal, LiteralType};
+use regex::Regex;
+
+const SPEC: [(&str, Option<&str>); 5] = [
+    // Skip whitespaces
+    (r"^\s+", None),
+
+    // Skip single-line comments
+    (r"^\/\/.*", None),
+
+    // Skip multi-line comments
+    (r"^\/\*[\s\S]*?\*\/", None),
+
+    // Numbers
+    (r"^\d+", Some("NUMBER")),
+
+    // Strings
+    (r#"^"[^"]*""#, Some("STRING"))
+];
 
 pub struct Tokenizer {
     pub string: LiteralType,
@@ -26,40 +44,30 @@ impl Tokenizer {
 
         match self.string.clone() {
             LiteralType::Type(string) => {
-                let string = string.chars().collect::<Vec<char>>();
-
-                // Numbers
-                if string[self.cursor].is_digit(10) {
-                    let mut num = String::new();
-                    while self.cursor < string.len() && string[self.cursor].is_digit(10) {
-                        num.push(string[self.cursor]);
-                        self.cursor += 1;
+                let string = string[self.cursor..].to_string();
+                for &(reg, token_type) in SPEC.iter() {
+                    if let Some(token_val) = self.get_match(Regex::new(reg).unwrap(),
+                                                            string.as_str()) {
+                        if token_type.is_none() {
+                            return self.get_next_token();
+                        }
+                        return Some(Literal {
+                            literal_type: LiteralType::Type(token_type?.to_string()),
+                            value: token_val,
+                        })
                     }
-
-                    return Some(Literal {
-                        literal_type: LiteralType::Type(String::from("NUMBER")),
-                        value: num,
-                    })
                 }
-
-                // Strings
-                if string[self.cursor] == '"' {
-                    let mut s = String::new();
-                    self.cursor += 1; // skip first '"'
-                    while string[self.cursor] != '"' && !self.is_eof() {
-                        s.push(string[self.cursor]);
-                        self.cursor += 1;
-                    }
-                    self.cursor += 1; // skip last '"'
-
-                    return Some(Literal {
-                        literal_type: LiteralType::Type(String::from("STRING")),
-                        value: s,
-                    })
-                }
+                panic!("Unexpected token: {string}");
             }
         }
+    }
 
+    /// Matches a token for given regex.
+    fn get_match(&mut self, reg: Regex, string: &str) -> Option<String> {
+        if let Some(mat) = reg.captures(string) {
+            self.cursor += mat.get(0).unwrap().len();
+            return Some(mat.get(0).unwrap().as_str().to_string());
+        }
         None
     }
 
@@ -68,15 +76,6 @@ impl Tokenizer {
         match self.string {
             LiteralType::Type(ref string) => {
                 self.cursor < string.len()
-            }
-        }
-    }
-
-    // Check if tokenizer reached EOF.
-    fn is_eof(&self) -> bool {
-        match self.string {
-            LiteralType::Type(ref string) => {
-                self.cursor == string.len()
             }
         }
     }
