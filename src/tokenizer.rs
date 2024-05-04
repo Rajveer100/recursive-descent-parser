@@ -2,10 +2,10 @@
 ///
 /// Lazily pulls a token from a stream.
 
-use crate::parser::{Literal, LiteralType};
+use crate::parser::{Literal, LiteralType, LiteralValue};
 use regex::Regex;
 
-const SPEC: [(&str, Option<&str>); 5] = [
+const SPEC: [(&str, Option<&str>); 6] = [
     // Skip whitespaces
     (r"^\s+", None),
 
@@ -14,6 +14,9 @@ const SPEC: [(&str, Option<&str>); 5] = [
 
     // Skip multi-line comments
     (r"^\/\*[\s\S]*?\*\/", None),
+
+    // Symbols, Delimiters
+    (r"^;", Some(";")),
 
     // Numbers
     (r"^\d+", Some("NUMBER")),
@@ -53,7 +56,7 @@ impl Tokenizer {
                         }
                         return Some(Literal {
                             literal_type: LiteralType::Type(token_type?.to_string()),
-                            value: token_val,
+                            value: Box::new(LiteralValue::Value(token_val)),
                         })
                     }
                 }

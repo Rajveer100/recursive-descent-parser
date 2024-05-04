@@ -10,12 +10,19 @@ struct Parser {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Literal {
     pub literal_type: LiteralType,
-    pub value: String,
+    pub value: Box<LiteralValue>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralType {
     Type(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiteralValue {
+    Value(String),
+    NestedValue(Option<Literal>),
+    NestedValueList(Vec<Option<Literal>>)
 }
 
 impl Parser {
@@ -45,7 +52,10 @@ impl Parser {
     ///   : NumericLiteral
     ///   ;
     fn program(&mut self) -> Option<Literal> {
-        self.literal()
+        Some(Literal {
+            literal_type: LiteralType::Type(String::from("Program")),
+            value: Box::new(LiteralValue::NestedValueList(self.statement_list())),
+        })
     }
 
     /// Literal
@@ -55,17 +65,56 @@ impl Parser {
     fn literal(&mut self) -> Option<Literal> {
         if let Some(lookahead) = &self.lookahead {
             return match lookahead.literal_type {
-                LiteralType::Type(ref string) => {
-                    match string.as_str() {
-                        "NUMBER" => Some(self.numeric_literal()),
-                        "STRING" => Some(self.string_literal()),
-                        _ => panic!("Literal: unexpected literal production.")
-                    }
-                }
-            }
+                LiteralType::Type(ref string) => match string.as_str() {
+                    "NUMBER" => Some(self.numeric_literal()),
+                    "STRING" => Some(self.string_literal()),
+                    _ => panic!("Literal: unexpected literal production."),
+                },
+            };
         }
 
         None
+    }
+
+    /// Statement List
+    ///   : Statement
+    ///   | StatementList Statement -> Statement Statement Statement Statement
+    ///   ;
+    fn statement_list(&mut self) -> Vec<Option<Literal>> {
+        let mut statement_list = vec![self.statement()];
+        while self.lookahead.is_some() {
+            statement_list.push(self.statement());
+        }
+
+        statement_list
+    }
+
+    /// Statement
+    ///   : ExpressionStatement
+    ///   ;
+    fn statement(&mut self) -> Option<Literal> {
+        self.expression_statement()
+    }
+
+    /// ExpressionStatement
+    ///   : Expression ';'
+    ///   ;
+    fn expression_statement(&mut self) -> Option<Literal> {
+        let expression = self.expression();
+        self.eat(LiteralType::Type(String::from(";")))
+            .expect("Should have been able to eat ';'!");
+
+        Some(Literal {
+            literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+            value: Box::new(LiteralValue::NestedValue(expression)),
+        })
+    }
+
+    /// Expression
+    ///   ; Literal
+    ///   ;
+    fn expression(&mut self) -> Option<Literal> {
+        self.literal()
     }
 
     /// Numeric Literal
@@ -100,7 +149,7 @@ impl Parser {
         if let Some(token) = self.lookahead.clone() {
             if token.literal_type != token_type {
                 return Err(format!(
-                    "Unexpected token: {}, expected: {:?}",
+                    "Unexpected token: {:?}, expected: {:?}",
                     token.value, token_type
                 ));
             }
@@ -110,7 +159,10 @@ impl Parser {
             return Ok(token);
         }
 
-        Err(format!("Unexpected end of input, expected: {:?}", token_type))
+        Err(format!(
+            "Unexpected end of input, expected: {:?}",
+            token_type
+        ))
     }
 }
 
@@ -119,24 +171,102 @@ mod tests {
     use crate::parser::*;
 
     #[test]
-    fn test_literals() {
+    fn test_statement_lists() {
         let mut parser = Parser::new();
 
-        let program: String = String::from(r#"
+        let program: String = String::from(
+            r#"
             // Program
             /*
                 Multiline comments...
             */
-            42
-        "#);
+            "hello";
+            42;
+            "#,
+        );
 
         let ast = parser.parse(program);
 
         assert_eq!(
             ast,
             Some(Literal {
-                literal_type: LiteralType::Type(String::from("NumericLiteral")),
-                value: String::from(r#"42"#),
+                literal_type: LiteralType::Type(String::from("Program")),
+                value: Box::new(LiteralValue::NestedValueList(vec![
+                    Some(Literal {
+                        literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                        value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                            literal_type: LiteralType::Type(String::from("StringLiteral")),
+                            value: Box::new(LiteralValue::Value(String::from("\"hello\"")))
+                        })))
+                    }),
+                    Some(Literal {
+                        literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                        value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                            literal_type: LiteralType::Type(String::from("NumericLiteral")),
+                            value: Box::new(LiteralValue::Value(String::from("42")))
+                        })))
+                    })
+                ]))
+            })
+        );
+        dbg!(ast);
+    }
+
+    #[test]
+    fn test_string_literals() {
+        let mut parser = Parser::new();
+
+        let program: String = String::from(
+            r#"
+            "hello";
+            "#,
+        );
+
+        let ast = parser.parse(program);
+
+        assert_eq!(
+            ast,
+            Some(Literal {
+                literal_type: LiteralType::Type(String::from("Program")),
+                value: Box::new(LiteralValue::NestedValueList(vec![
+                    Some(Literal {
+                        literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                        value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                            literal_type: LiteralType::Type(String::from("StringLiteral")),
+                            value: Box::new(LiteralValue::Value(String::from("\"hello\"")))
+                        })))
+                    })
+                ]))
+            })
+        );
+        dbg!(ast);
+    }
+
+    #[test]
+    fn test_numeric_literals() {
+        let mut parser = Parser::new();
+
+        let program: String = String::from(
+            r#"
+            42;
+            "#,
+        );
+
+        let ast = parser.parse(program);
+
+        assert_eq!(
+            ast,
+            Some(Literal {
+                literal_type: LiteralType::Type(String::from("Program")),
+                value: Box::new(LiteralValue::NestedValueList(vec![
+                    Some(Literal {
+                        literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                        value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                            literal_type: LiteralType::Type(String::from("NumericLiteral")),
+                            value: Box::new(LiteralValue::Value(String::from("42")))
+                        })))
+                    })
+                ]))
             })
         );
         dbg!(ast);
