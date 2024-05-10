@@ -5,7 +5,7 @@
 use crate::parser::{Literal, LiteralType, LiteralValue};
 use regex::Regex;
 
-const SPEC: [(&str, Option<&str>); 6] = [
+const SPEC: [(&str, Option<&str>); 8] = [
     // Skip whitespaces
     (r"^\s+", None),
 
@@ -17,6 +17,8 @@ const SPEC: [(&str, Option<&str>); 6] = [
 
     // Symbols, Delimiters
     (r"^;", Some(";")),
+    (r"^\{", Some("{")),
+    (r"^\}", Some("}")),
 
     // Numbers
     (r"^\d+", Some("NUMBER")),

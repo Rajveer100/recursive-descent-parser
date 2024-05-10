@@ -22,7 +22,7 @@ pub enum LiteralType {
 pub enum LiteralValue {
     Value(String),
     NestedValue(Option<Literal>),
-    NestedValueList(Vec<Option<Literal>>)
+    NestedValueList(Vec<Option<Literal>>),
 }
 
 impl Parser {
@@ -54,7 +54,7 @@ impl Parser {
     fn program(&mut self) -> Option<Literal> {
         Some(Literal {
             literal_type: LiteralType::Type(String::from("Program")),
-            value: Box::new(LiteralValue::NestedValueList(self.statement_list())),
+            value: Box::new(LiteralValue::NestedValueList(self.statement_list(None))),
         })
     }
 
@@ -80,9 +80,17 @@ impl Parser {
     ///   : Statement
     ///   | StatementList Statement -> Statement Statement Statement Statement
     ///   ;
-    fn statement_list(&mut self) -> Vec<Option<Literal>> {
+    fn statement_list(
+        &mut self,
+        stop_lookahead: Option<Box<LiteralValue>>,
+    ) -> Vec<Option<Literal>> {
         let mut statement_list = vec![self.statement()];
-        while self.lookahead.is_some() {
+        while let Some(ref lookahead) = self.lookahead {
+            if let Some(ref stop_lookahead) = stop_lookahead {
+                if lookahead.value == *stop_lookahead {
+                    break;
+                }
+            }
             statement_list.push(self.statement());
         }
 
@@ -91,9 +99,42 @@ impl Parser {
 
     /// Statement
     ///   : ExpressionStatement
+    ///   | BlockStatement
+    ///   | EmptyStatement
     ///   ;
     fn statement(&mut self) -> Option<Literal> {
-        self.expression_statement()
+        if let Some(ref lookahead) = self.lookahead {
+            if lookahead.literal_type == LiteralType::Type(String::from("{")) {
+                self.block_statement()
+            } else {
+                self.expression_statement()
+            }
+        } else {
+            None
+        }
+    }
+
+    /// BlockStatement
+    ///  : '{' OptStatementList '}'
+    ///  ;
+    fn block_statement(&mut self) -> Option<Literal> {
+        self.eat(LiteralType::Type(String::from("{")))
+            .expect("Should have been able to eat '{'!");
+
+        let mut body = vec![];
+        if let Some(ref lookahead) = self.lookahead {
+            if lookahead.literal_type != LiteralType::Type(String::from("}")) {
+                body = self.statement_list(Some(Box::new(LiteralValue::Value(String::from("}")))));
+            }
+        }
+
+        self.eat(LiteralType::Type(String::from("}")))
+            .expect("Should have been able to eat '}'!");
+
+        Some(Literal {
+            literal_type: LiteralType::Type(String::from("BlockStatement")),
+            value: Box::new(LiteralValue::NestedValueList(body)),
+        })
     }
 
     /// ExpressionStatement
@@ -228,15 +269,13 @@ mod tests {
             ast,
             Some(Literal {
                 literal_type: LiteralType::Type(String::from("Program")),
-                value: Box::new(LiteralValue::NestedValueList(vec![
-                    Some(Literal {
-                        literal_type: LiteralType::Type(String::from("ExpressionStatement")),
-                        value: Box::new(LiteralValue::NestedValue(Some(Literal {
-                            literal_type: LiteralType::Type(String::from("StringLiteral")),
-                            value: Box::new(LiteralValue::Value(String::from("\"hello\"")))
-                        })))
-                    })
-                ]))
+                value: Box::new(LiteralValue::NestedValueList(vec![Some(Literal {
+                    literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                    value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                        literal_type: LiteralType::Type(String::from("StringLiteral")),
+                        value: Box::new(LiteralValue::Value(String::from("\"hello\"")))
+                    })))
+                })]))
             })
         );
         dbg!(ast);
@@ -258,15 +297,133 @@ mod tests {
             ast,
             Some(Literal {
                 literal_type: LiteralType::Type(String::from("Program")),
-                value: Box::new(LiteralValue::NestedValueList(vec![
-                    Some(Literal {
-                        literal_type: LiteralType::Type(String::from("ExpressionStatement")),
-                        value: Box::new(LiteralValue::NestedValue(Some(Literal {
-                            literal_type: LiteralType::Type(String::from("NumericLiteral")),
-                            value: Box::new(LiteralValue::Value(String::from("42")))
-                        })))
-                    })
-                ]))
+                value: Box::new(LiteralValue::NestedValueList(vec![Some(Literal {
+                    literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                    value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                        literal_type: LiteralType::Type(String::from("NumericLiteral")),
+                        value: Box::new(LiteralValue::Value(String::from("42")))
+                    })))
+                })]))
+            })
+        );
+        dbg!(ast);
+    }
+
+    #[test]
+    fn test_blocks() {
+        let mut parser = Parser::new();
+
+        let program: String = String::from(
+            r#"
+            {
+              42;
+              "hello";
+            }
+            "#,
+        );
+
+        let ast = parser.parse(program);
+
+        assert_eq!(
+            ast,
+            Some(Literal {
+                literal_type: LiteralType::Type(String::from("Program")),
+                value: Box::new(LiteralValue::NestedValueList(vec![Some(Literal {
+                    literal_type: LiteralType::Type(String::from("BlockStatement")),
+                    value: Box::new(LiteralValue::NestedValueList(vec![
+                        Some(Literal {
+                            literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                            value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                                literal_type: LiteralType::Type(String::from("NumericLiteral")),
+                                value: Box::new(LiteralValue::Value(String::from("42")))
+                            })))
+                        }),
+                        Some(Literal {
+                            literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                            value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                                literal_type: LiteralType::Type(String::from("StringLiteral")),
+                                value: Box::new(LiteralValue::Value(String::from("\"hello\"")))
+                            })))
+                        })
+                    ]))
+                })]))
+            })
+        );
+        dbg!(ast);
+    }
+
+    #[test]
+    fn test_empty_block() {
+        let mut parser = Parser::new();
+
+        let program: String = String::from(
+            r#"
+            {
+              // ...
+            }
+            "#,
+        );
+
+        let ast = parser.parse(program);
+
+        assert_eq!(
+            ast,
+            Some(Literal {
+                literal_type: LiteralType::Type(String::from("Program")),
+                value: Box::new(LiteralValue::NestedValueList(vec![Some(Literal {
+                    literal_type: LiteralType::Type(String::from("BlockStatement")),
+                    value: Box::new(LiteralValue::NestedValueList(vec![]))
+                })]))
+            })
+        );
+        dbg!(ast);
+    }
+
+    #[test]
+    fn test_nested_blocks() {
+        let mut parser = Parser::new();
+
+        let program: String = String::from(
+            r#"
+            {
+              42;
+              {
+                "hello";
+              }
+            }
+            "#,
+        );
+
+        let ast = parser.parse(program);
+
+        assert_eq!(
+            ast,
+            Some(Literal {
+                literal_type: LiteralType::Type(String::from("Program")),
+                value: Box::new(LiteralValue::NestedValueList(vec![Some(Literal {
+                    literal_type: LiteralType::Type(String::from("BlockStatement")),
+                    value: Box::new(LiteralValue::NestedValueList(vec![
+                        Some(Literal {
+                            literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                            value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                                literal_type: LiteralType::Type(String::from("NumericLiteral")),
+                                value: Box::new(LiteralValue::Value(String::from("42")))
+                            })))
+                        }),
+                        Some(Literal {
+                            literal_type: LiteralType::Type(String::from("BlockStatement")),
+                            value: Box::new(LiteralValue::NestedValueList(vec![Some(Literal {
+                                literal_type: LiteralType::Type(String::from(
+                                    "ExpressionStatement"
+                                )),
+                                value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                                    literal_type: LiteralType::Type(String::from("StringLiteral")),
+                                    value: Box::new(LiteralValue::Value(String::from("\"hello\"")))
+                                })))
+                            })]))
+                        })
+                    ]))
+                })]))
             })
         );
         dbg!(ast);
