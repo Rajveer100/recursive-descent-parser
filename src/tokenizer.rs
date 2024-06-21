@@ -5,7 +5,7 @@
 use crate::parser::{Literal, LiteralType, LiteralValue};
 use regex::Regex;
 
-const SPEC: [(&str, Option<&str>); 8] = [
+const SPEC: [(&str, Option<&str>); 12] = [
     // Skip whitespaces
     (r"^\s+", None),
 
@@ -19,6 +19,12 @@ const SPEC: [(&str, Option<&str>); 8] = [
     (r"^;", Some(";")),
     (r"^\{", Some("{")),
     (r"^\}", Some("}")),
+    (r"^\(", Some("(")),
+    (r"^\)", Some(")")),
+
+    // Math operators +, -, *, /
+    (r"^[+\-]", Some("ADDITIVE_OPERATOR")),
+    (r"^[*\/]", Some("MULTIPLICATIVE_OPERATOR")),
 
     // Numbers
     (r"^\d+", Some("NUMBER")),
@@ -62,7 +68,7 @@ impl Tokenizer {
                         })
                     }
                 }
-                panic!("Unexpected token: {string}");
+                panic!("Unexpected token: {:?}", string.chars().nth(0));
             }
         }
     }

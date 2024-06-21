@@ -63,17 +63,13 @@ impl Parser {
     ///   | StringLiteral
     ///   ;
     fn literal(&mut self) -> Option<Literal> {
-        if let Some(lookahead) = &self.lookahead {
-            return match lookahead.literal_type {
-                LiteralType::Type(ref string) => match string.as_str() {
-                    "NUMBER" => Some(self.numeric_literal()),
-                    "STRING" => Some(self.string_literal()),
-                    _ => panic!("Literal: unexpected literal production."),
-                },
-            };
-        }
-
-        None
+        return match self.lookahead.clone()?.literal_type {
+            LiteralType::Type(ref string) => match string.as_str() {
+                "NUMBER" => Some(self.numeric_literal()),
+                "STRING" => Some(self.string_literal()),
+                _ => panic!("Literal: unexpected literal production."),
+            },
+        };
     }
 
     /// Statement List
@@ -103,14 +99,10 @@ impl Parser {
     ///   | EmptyStatement
     ///   ;
     fn statement(&mut self) -> Option<Literal> {
-        if let Some(ref lookahead) = self.lookahead {
-            if lookahead.literal_type == LiteralType::Type(String::from("{")) {
-                self.block_statement()
-            } else {
-                self.expression_statement()
-            }
+        if self.lookahead.clone()?.literal_type == LiteralType::Type(String::from("{")) {
+            self.block_statement()
         } else {
-            None
+            self.expression_statement()
         }
     }
 
@@ -122,10 +114,8 @@ impl Parser {
             .expect("Should have been able to eat '{'!");
 
         let mut body = vec![];
-        if let Some(ref lookahead) = self.lookahead {
-            if lookahead.literal_type != LiteralType::Type(String::from("}")) {
-                body = self.statement_list(Some(Box::new(LiteralValue::Value(String::from("}")))));
-            }
+        if self.lookahead.clone()?.literal_type != LiteralType::Type(String::from("}")) {
+            body = self.statement_list(Some(Box::new(LiteralValue::Value(String::from("}")))));
         }
 
         self.eat(LiteralType::Type(String::from("}")))
@@ -155,7 +145,90 @@ impl Parser {
     ///   ; Literal
     ///   ;
     fn expression(&mut self) -> Option<Literal> {
-        self.literal()
+        self.additive_expression()
+    }
+
+    /// Additive Expression
+    ///   : MultiplicativeExpression
+    ///   | AdditiveExpression ADDITIVE_OPERATOR MultiplicativeExpression
+    ///   ;
+    fn additive_expression(&mut self) -> Option<Literal> {
+        self.binary_expression(String::from("ADDITIVE_OPERATOR"))
+    }
+
+    /// Multiplicative Expression
+    ///   : MultiplicativeExpression
+    ///   | MultiplicativeExpression MULTIPLICATIVE_OPERATOR PrimaryExpression
+    ///   ;
+    fn multiplicative_expression(&mut self) -> Option<Literal> {
+        self.binary_expression(String::from("MULTIPLICATIVE_OPERATOR"))
+    }
+
+    /// Generic binary expression.
+    fn binary_expression(&mut self, operator_token: String) -> Option<Literal> {
+        let mut left = match operator_token.as_str() {
+            "ADDITIVE_OPERATOR" => self.multiplicative_expression(),
+            "MULTIPLICATIVE_OPERATOR" => self.primary_expression(),
+            _ => None
+        };
+
+        while self.lookahead.clone()?.literal_type
+            == LiteralType::Type(operator_token.clone())
+        {
+            let operator = self
+                .eat(LiteralType::Type(operator_token.clone()))
+                .expect(format!("Should have been able to eat '{}'!", operator_token).as_str());
+            let right = match operator_token.as_str() {
+                "ADDITIVE_OPERATOR" => self.multiplicative_expression(),
+                "MULTIPLICATIVE_OPERATOR" => self.primary_expression(),
+                _ => None
+            };
+
+            left = Some(Literal {
+                literal_type: LiteralType::Type(String::from("BinaryExpression")),
+                value: Box::new(LiteralValue::NestedValueList(vec![
+                    Some(Literal {
+                        literal_type: LiteralType::Type(String::from("Left")),
+                        value: left?.value,
+                    }),
+                    Some(Literal {
+                        literal_type: LiteralType::Type(String::from("Operator")),
+                        value: operator.value,
+                    }),
+                    Some(Literal {
+                        literal_type: LiteralType::Type(String::from("Right")),
+                        value: right?.value,
+                    }),
+                ])),
+            });
+        }
+
+        left
+    }
+
+    /// Primary Expression
+    ///   : Literal
+    ///   | ParenthesisedExpression
+    ///   ;
+    fn primary_expression(&mut self) -> Option<Literal> {
+        match self.lookahead.clone()?.literal_type {
+            LiteralType::Type(ref string) => match string.as_str() {
+                "(" => self.parenthesised_expression(),
+                _ => self.literal()
+            }
+        }
+    }
+
+    /// Parenthesised Expression
+    ///   : '(' Expression ')'
+    ///   ;
+    fn parenthesised_expression(&mut self) -> Option<Literal> {
+        self.eat(LiteralType::Type(String::from("(")))
+            .expect("Should have been able to eat '('!");
+        let expression = self.expression();
+        self.eat(LiteralType::Type(String::from(")")))
+            .expect("Should have been able to eat ')'!");
+        expression
     }
 
     /// Numeric Literal
@@ -423,6 +496,114 @@ mod tests {
                             })]))
                         })
                     ]))
+                })]))
+            })
+        );
+        dbg!(ast);
+    }
+
+    #[test]
+    fn test_math() {
+        let mut parser = Parser::new();
+
+        let program: String = String::from(
+            r#"
+            2 + 2 * 2;
+            "#,
+        );
+
+        let ast = parser.parse(program);
+
+        assert_eq!(
+            ast,
+            Some(Literal {
+                literal_type: LiteralType::Type(String::from("Program")),
+                value: Box::new(LiteralValue::NestedValueList(vec![Some(Literal {
+                    literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                    value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                        literal_type: LiteralType::Type(String::from("BinaryExpression")),
+                        value: Box::new(LiteralValue::NestedValueList(vec![
+                            Some(Literal {
+                                literal_type: LiteralType::Type(String::from("Left")),
+                                value: Box::new(LiteralValue::Value(String::from("2")))
+                            }),
+                            Some(Literal {
+                                literal_type: LiteralType::Type(String::from("Operator")),
+                                value: Box::new(LiteralValue::Value(String::from("+")))
+                            }),
+                            Some(Literal {
+                                literal_type: LiteralType::Type(String::from("Right")),
+                                value: Box::new(LiteralValue::NestedValueList(vec![
+                                    Some(Literal {
+                                        literal_type: LiteralType::Type(String::from("Left")),
+                                        value: Box::new(LiteralValue::Value(String::from("2")))
+                                    }),
+                                    Some(Literal {
+                                        literal_type: LiteralType::Type(String::from("Operator")),
+                                        value: Box::new(LiteralValue::Value(String::from("*")))
+                                    }),
+                                    Some(Literal {
+                                        literal_type: LiteralType::Type(String::from("Right")),
+                                        value: Box::new(LiteralValue::Value(String::from("2")))
+                                    }),
+                                ]))
+                            })
+                        ]))
+                    })))
+                })]))
+            })
+        );
+        dbg!(ast);
+    }
+
+    #[test]
+    fn test_op_precedence() {
+        let mut parser = Parser::new();
+
+        let program: String = String::from(
+            r#"
+            (2 + 2) * 2;
+            "#,
+        );
+
+        let ast = parser.parse(program);
+
+        assert_eq!(
+            ast,
+            Some(Literal {
+                literal_type: LiteralType::Type(String::from("Program")),
+                value: Box::new(LiteralValue::NestedValueList(vec![Some(Literal {
+                    literal_type: LiteralType::Type(String::from("ExpressionStatement")),
+                    value: Box::new(LiteralValue::NestedValue(Some(Literal {
+                        literal_type: LiteralType::Type(String::from("BinaryExpression")),
+                        value: Box::new(LiteralValue::NestedValueList(vec![
+                            Some(Literal {
+                                literal_type: LiteralType::Type(String::from("Left")),
+                                value: Box::new(LiteralValue::NestedValueList(vec![
+                                    Some(Literal {
+                                        literal_type: LiteralType::Type(String::from("Left")),
+                                        value: Box::new(LiteralValue::Value(String::from("2")))
+                                    }),
+                                    Some(Literal {
+                                        literal_type: LiteralType::Type(String::from("Operator")),
+                                        value: Box::new(LiteralValue::Value(String::from("+")))
+                                    }),
+                                    Some(Literal {
+                                        literal_type: LiteralType::Type(String::from("Right")),
+                                        value: Box::new(LiteralValue::Value(String::from("2")))
+                                    }),
+                                ]))
+                            }),
+                            Some(Literal {
+                                literal_type: LiteralType::Type(String::from("Operator")),
+                                value: Box::new(LiteralValue::Value(String::from("*")))
+                            }),
+                            Some(Literal {
+                                literal_type: LiteralType::Type(String::from("Right")),
+                                value: Box::new(LiteralValue::Value(String::from("2")))
+                            }),
+                        ]))
+                    })))
                 })]))
             })
         );
